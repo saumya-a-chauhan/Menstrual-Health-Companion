@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 # ==========================================
 load_dotenv()
 
+GROK_API_KEY = os.getenv("GROK_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
@@ -17,8 +18,11 @@ if not GROQ_API_KEY:
 if not TAVILY_API_KEY:
     raise ValueError("❌ TAVILY_API_KEY not found")
 
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+if not GROK_API_KEY:
+    print("⚠️ GROK_API_KEY not found. Will default straight to Groq.")
 
+GROK_URL = "https://api.x.ai/v1/chat/completions"
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 # ==========================================
 # HELPERS
@@ -26,9 +30,9 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 def clean_json_string(text):
     text = text.strip()
     if text.startswith("```"):
-        text = text.split("```", 1)[-1]
+        text = text.split("\n```", 1)[-1]
     if text.endswith("```"):
-        text = text.rsplit("```", 1)[0]
+        text = text.rsplit("\n```", 1)[0]
     return text.strip()
 
 
@@ -41,28 +45,53 @@ def safe_json_load(text):
 
 
 def call_llm(system_prompt, user_prompt, temperature=0.2):
-    headers = {
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
+    
+    # --- 1. Try Grok First ---
+    if GROK_API_KEY:
+        try:
+            grok_headers = {
+                "Authorization": f"Bearer {GROK_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            grok_payload = {
+                "model": "grok-2-latest", 
+                "messages": messages,
+                "temperature": temperature,
+                "response_format": {"type": "json_object"}
+            }
+            
+            response = requests.post(GROK_URL, headers=grok_headers, json=grok_payload, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"].strip()
+            
+        except Exception as e:
+            print(f"⚠️ Grok failed: {e}. Falling back to Groq...")
+
+    # --- 2. Fallback to Groq ---
+    groq_headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json"
     }
 
-    payload = {
+    groq_payload = {
         "model": "llama-3.3-70b-versatile",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
+        "messages": messages,
         "temperature": temperature,
         "response_format": {"type": "json_object"}
     }
 
     try:
-        response = requests.post(GROQ_URL, headers=headers, json=payload, timeout=15)
+        response = requests.post(GROQ_URL, headers=groq_headers, json=groq_payload, timeout=15)
         response.raise_for_status()
         data = response.json()
         return data["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        print("❌ LLM ERROR:", response.text if 'response' in locals() else str(e))
+        print("❌ LLM ERROR (Groq fallback failed):", response.text if 'response' in locals() else str(e))
         raise e
 
 
@@ -288,7 +317,7 @@ def run_agent(user_input):
         state = step5_empathetic_translation(state)
         state = step6_final_formatter(state)
 
-        summary = f"\n\n---\n### 📊 AI Summary Scorecard\n"
+        summary = f"\n\n---\n### AI Summary Scorecard\n"
         summary += f"- **Intent:** {'Symptom Analysis' if state.get('symptoms') else 'Educational'}\n"
         summary += f"- **Verification Status:** {'✅ Verified' if state.get('verification', {}).get('is_valid') else '⚠️ Adjusted'}\n"
         summary += f"- **Sources:** {len(state.get('retrieved_sources', []))}"
@@ -306,13 +335,13 @@ def run_agent(user_input):
 
 
 if __name__ == "__main__":
-    print("🌸 Companion Ready (Relevance-Safe Build)\n")
+    print(" Companion Ready (Relevance-Safe Build)\n")
 
     while True:
         user_text = input("How can I help you today? > ")
 
         if user_text.lower() in ['exit', 'quit']:
-            print("Take care! 🌷")
+            print("Take care! ")
             break
 
         if not user_text.strip():
