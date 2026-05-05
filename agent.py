@@ -12,17 +12,23 @@ GROK_API_KEY = os.getenv("GROK_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
-if not GROQ_API_KEY:
-    raise ValueError("❌ GROQ_API_KEY not found")
-
 if not TAVILY_API_KEY:
     raise ValueError("❌ TAVILY_API_KEY not found")
 
-if not GROK_API_KEY:
-    print("⚠️ GROK_API_KEY not found. Will default straight to Groq.")
+# Determine active API
+ACTIVE_LLM = None
+if GROK_API_KEY:
+    ACTIVE_LLM = "grok"
+    print("🚀 Using Grok API")
+elif GROQ_API_KEY:
+    ACTIVE_LLM = "groq"
+    print("🚀 Using Groq API (Grok key not found)")
+else:
+    raise ValueError("❌ Neither GROK_API_KEY nor GROQ_API_KEY found. Please set at least one.")
 
 GROK_URL = "https://api.x.ai/v1/chat/completions"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
 
 # ==========================================
 # HELPERS
@@ -50,48 +56,38 @@ def call_llm(system_prompt, user_prompt, temperature=0.2):
         {"role": "user", "content": user_prompt}
     ]
     
-    # --- 1. Try Grok First ---
-    if GROK_API_KEY:
-        try:
-            grok_headers = {
-                "Authorization": f"Bearer {GROK_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            grok_payload = {
-                "model": "grok-2-latest", 
-                "messages": messages,
-                "temperature": temperature,
-                "response_format": {"type": "json_object"}
-            }
-            
-            response = requests.post(GROK_URL, headers=grok_headers, json=grok_payload, timeout=15)
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"].strip()
-            
-        except Exception as e:
-            print(f"⚠️ Grok failed: {e}. Falling back to Groq...")
-
-    # --- 2. Fallback to Groq ---
-    groq_headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    groq_payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": messages,
-        "temperature": temperature,
-        "response_format": {"type": "json_object"}
-    }
+    if ACTIVE_LLM == "grok":
+        headers = {
+            "Authorization": f"Bearer {GROK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "grok-2-latest",
+            "messages": messages,
+            "temperature": temperature,
+            "response_format": {"type": "json_object"}
+        }
+        url = GROK_URL
+    else:  # ACTIVE_LLM == "groq"
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "llama-3.3-70b-versatile",
+            "messages": messages,
+            "temperature": temperature,
+            "response_format": {"type": "json_object"}
+        }
+        url = GROQ_URL
 
     try:
-        response = requests.post(GROQ_URL, headers=groq_headers, json=groq_payload, timeout=15)
+        response = requests.post(url, headers=headers, json=payload, timeout=15)
         response.raise_for_status()
         data = response.json()
         return data["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        print("❌ LLM ERROR (Groq fallback failed):", response.text if 'response' in locals() else str(e))
+        print(f"❌ LLM ERROR ({ACTIVE_LLM}):", response.text if 'response' in locals() else str(e))
         raise e
 
 

@@ -57,6 +57,7 @@ The agent operates via a shared `state` dictionary that passes structured data t
     Create a `.env` file in the root directory and add your keys:
     
 ```env
+    GROK_API_KEY=your_grok_key_here
     GROQ_API_KEY=your_xai_grok_key_here
     TAVILY_API_KEY=your_tavily_key_here
     ```
